@@ -1,0 +1,6 @@
+[workspace]
+members = ["accel-daemon", "adxl355-rs"]
+resolver = "2"
+
+[workspace.dependencies]
+adxl355 = { path = "adxl355-rs" }
