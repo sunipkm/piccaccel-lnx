@@ -5,11 +5,13 @@ edition = "2024"
 
 [dependencies]
 adxl355 = { workspace = true }
+atomic-time = { version = "0.1" }
 clap = { version = "4.5", features = ["derive"] }
 embedded-hal = { version = "1.0", default-features = false }
 env_logger = { version = "0.11" }
 futures-channel = { version = "0.3" }
 futures-util = { version = "0.3" }
+lazy_static = "1.5"
 log = { version = "0.4" }
 rppal = { version = "0.22", default-features = false, features = ["embedded-hal"] }
 tokio = { version = "1.40", features = [

@@ -1,11 +1,15 @@
-use adxl355::{Adxl355, Config as ADXLConfig, F32x3, Range, ODR_LPF};
+use adxl355::{Accelerometer, Adxl355, Config as ADXLConfig, F32x3, ODR_LPF, Range};
+use atomic_time::AtomicOptionInstant;
 use rppal::gpio::Gpio;
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 use std::error::Error;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::broadcast::Sender;
 
 const ACCEL_ODR: ODR_LPF = ODR_LPF::ODR_1000_Hz;
 
@@ -18,6 +22,7 @@ pub struct AccelDesc {
 pub fn accelerator_init(
     acceldescs: &[AccelDesc],
     running: Arc<AtomicBool>,
+    sink: Sender<(u32, u32, F32x3)>,
 ) -> Result<(), Box<dyn Error>> {
     let gpio = Gpio::new()?;
     let mut pins = acceldescs
@@ -45,13 +50,30 @@ pub fn accelerator_init(
                             .range(Range::_2G),
                     ) {
                         if let Err(e) = accel.start() {
-                            log::error!("Failed to start accel: {}", e);
+                            log::error!("Failed to start accel: {e}");
                             None
-                        } else if let Err(e) = drdy.set_async_interrupt(rppal::gpio::Trigger::FallingEdge, None, |_| {}) {
-                            log::error!("Failed to set async interrupt for pin {}: {}", acceldesc.drdy, e);
+                        } else if let Err(e) = {
+                            let sink = sink.clone();
+                            let past = AtomicOptionInstant::none();
+                            drdy.set_async_interrupt(
+                                rppal::gpio::Trigger::FallingEdge,
+                                None,
+                                move |_| {
+                                    accelerator_callback(index as u32, &mut accel, &past, &sink)
+                                },
+                            )
+                        } {
+                            log::error!(
+                                "Failed to set async interrupt for pin {}: {}",
+                                acceldesc.drdy,
+                                e
+                            );
                             None
                         } else {
-                            log::info!("Accelerometer on bus {:?} initialized successfully.", acceldesc.bus);
+                            log::info!(
+                                "Accelerometer on bus {:?} initialized successfully.",
+                                acceldesc.bus
+                            );
                             Some(drdy)
                         }
                     } else {
@@ -86,12 +108,29 @@ pub fn accelerator_init(
     log::info!("Stopping accelerometer thread.");
     for pin in pins.iter_mut() {
         if let Err(e) = pin.clear_async_interrupt() {
-            log::error!("Failed to clear async interrupt for pin {:?}: {}", pin, e);
+            log::error!("Failed to clear async interrupt for pin {pin:?}: {e}");
         }
     }
     Ok(())
 }
 
-fn accelerator_callback(index: usize, device: Adxl355<Spi>, sink: tokio::sync::broadcast::Sender<(usize, F32x3)>) {
-    
+fn accelerator_callback(
+    index: u32,
+    device: &mut Adxl355<Spi>,
+    past: &AtomicOptionInstant,
+    sink: &Sender<(u32, u32, F32x3)>,
+) {
+    let now = Instant::now();
+    let gap = past
+        .swap(Some(now), Ordering::Relaxed)
+        .map(|past| now.duration_since(past).as_micros() as u32)
+        .unwrap_or(0);
+
+    if let Ok(data) = device.accel_norm() {
+        if let Err(e) = sink.send((index, gap, data)) {
+            log::error!("Failed to send accelerometer data: {e}");
+        }
+    } else {
+        log::error!("Failed to read accelerometer data from device at index {index}",);
+    }
 }
