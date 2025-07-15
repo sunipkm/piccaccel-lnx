@@ -1,31 +1,48 @@
 use adxl355::{Accelerometer, Adxl355, Config as ADXLConfig, F32x3, ODR_LPF, Range};
 use atomic_time::AtomicOptionInstant;
-use rppal::gpio::Gpio;
+use rppal::gpio::{Gpio, InputPin};
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
+use serde::Serialize;
 use std::error::Error;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::sync::atomic::Ordering;
+use std::time::Instant;
 use tokio::sync::broadcast::Sender;
 
 const ACCEL_ODR: ODR_LPF = ODR_LPF::ODR_1000_Hz;
 
 pub struct AccelDesc {
-    bus: Bus,
-    ss: SlaveSelect,
-    drdy: u8,
+    pub bus: Bus,
+    pub ss: SlaveSelect,
+    pub drdy: u8,
+}
+
+#[derive(Debug, Serialize, Copy, Clone)]
+pub struct AccelData {
+    pub idx: u32,
+    pub gap: u32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl From<(u32, u32, F32x3)> for AccelData {
+    fn from(val: (u32, u32, F32x3)) -> Self {
+        AccelData {
+            idx: val.0,
+            gap: val.1,
+            x: val.2.x,
+            y: val.2.y,
+            z: val.2.z,
+        }
+    }
 }
 
 pub fn accelerator_init(
     acceldescs: &[AccelDesc],
-    running: Arc<AtomicBool>,
-    sink: Sender<(u32, u32, F32x3)>,
-) -> Result<(), Box<dyn Error>> {
+    sink: Sender<AccelData>,
+) -> Result<Vec<InputPin>, Box<dyn Error>> {
     let gpio = Gpio::new()?;
-    let mut pins = acceldescs
+    let pins = acceldescs
         .iter()
         .enumerate()
         .filter_map(|(index, acceldesc)| {
@@ -99,26 +116,15 @@ pub fn accelerator_init(
         .collect::<Vec<_>>();
     if pins.is_empty() {
         log::warn!("No accelerometer DRDY pins found, exiting thread.");
-        return Ok(());
     }
-    log::info!("Found {} accelerometer DRDY pins.", pins.len());
-    while running.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_secs(1));
-    }
-    log::info!("Stopping accelerometer thread.");
-    for pin in pins.iter_mut() {
-        if let Err(e) = pin.clear_async_interrupt() {
-            log::error!("Failed to clear async interrupt for pin {pin:?}: {e}");
-        }
-    }
-    Ok(())
+    Ok(pins)
 }
 
 fn accelerator_callback(
     index: u32,
     device: &mut Adxl355<Spi>,
     past: &AtomicOptionInstant,
-    sink: &Sender<(u32, u32, F32x3)>,
+    sink: &Sender<AccelData>,
 ) {
     let now = Instant::now();
     let gap = past
@@ -127,7 +133,7 @@ fn accelerator_callback(
         .unwrap_or(0);
 
     if let Ok(data) = device.accel_norm() {
-        if let Err(e) = sink.send((index, gap, data)) {
+        if let Err(e) = sink.send((index, gap, data).into()) {
             log::error!("Failed to send accelerometer data: {e}");
         }
     } else {
