@@ -8,7 +8,6 @@ use std::{
 
 use accel_data::{AccelData, tcp_server};
 use clap::Parser;
-use tokio::net::tcp;
 /// Program to forward serial port over TCP
 #[derive(Parser, Debug)]
 #[command(version, about, long_about)]

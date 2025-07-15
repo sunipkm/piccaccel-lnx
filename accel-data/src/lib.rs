@@ -5,6 +5,7 @@ pub use net::tcp_server;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(C, packed)]
 /// Accelerometer data structure
 pub struct AccelData {
     /// Sensor Index
@@ -29,5 +30,17 @@ impl From<(u32, u32, F32x3)> for AccelData {
             y: val.2.y,
             z: val.2.z,
         }
+    }
+}
+
+impl AccelData {
+    pub fn as_bytes(self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(std::mem::size_of::<AccelData>());
+        buf.extend_from_slice(&self.idx.to_le_bytes());
+        buf.extend_from_slice(&self.gap.to_le_bytes());
+        buf.extend_from_slice(&self.x.to_le_bytes());
+        buf.extend_from_slice(&self.y.to_le_bytes());
+        buf.extend_from_slice(&self.z.to_le_bytes());
+        buf
     }
 }

@@ -4,8 +4,8 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-// use futures_util::
-use tokio::sync::broadcast::Sender;
+
+use tokio::{io::AsyncWriteExt, sync::broadcast::Sender};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 pub async fn tcp_server(port: u16, running: Arc<AtomicBool>, sink: Sender<AccelData>) {
@@ -21,7 +21,7 @@ pub async fn tcp_server(port: u16, running: Arc<AtomicBool>, sink: Sender<AccelD
                 let running = running.clone();
                 let sink = sink.clone();
                 tokio::spawn(async move {
-                    handle_client(socket, addr, running, sink).await;
+                    handle_client_tcp(socket, addr, running, sink).await;
                 });
             }
             Err(e) => {
@@ -32,7 +32,52 @@ pub async fn tcp_server(port: u16, running: Arc<AtomicBool>, sink: Sender<AccelD
     log::info!("[NET] TCP server stopped");
 }
 
-async fn handle_client(
+#[allow(dead_code)]
+async fn handle_client_tcp(
+    socket: tokio::net::TcpStream,
+    addr: std::net::SocketAddr,
+    running: Arc<AtomicBool>,
+    sink: Sender<AccelData>,
+) {
+    log::info!("[NET] {addr}> Handling client.");
+    let (_, mut writer) = socket.into_split();
+    let mut source = sink.subscribe();
+    let mut buf = Vec::with_capacity(128 * std::mem::size_of::<AccelData>());
+    let mut counter = 0;
+
+    while running.load(Ordering::Relaxed) {
+        tokio::select! {
+            msg = source.recv() => {
+                match msg {
+                    Ok(data) => {
+                        if buf.len() < buf.capacity() {
+                            buf.extend_from_slice(&data.as_bytes());
+                        } else {
+                            log::debug!("[NET] {addr}> Sending data.");
+                            if writer.write_all(&buf).await.is_err() {
+                                log::error!("[NET] {addr}> Error sending data");
+                                break;
+                            }
+                            buf.clear();
+                        }
+                        counter += 1;
+                    }
+                    Err(e) => {
+                        log::error!("[NET] {addr}> Error receiving data: {e}");
+                        break;
+                    }
+                }
+            },
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(1000)) => {
+                log::info!("[NET] {addr}> Sent {counter} packets.");
+                counter = 0;
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+async fn handle_client_wsock(
     socket: tokio::net::TcpStream,
     addr: std::net::SocketAddr,
     running: Arc<AtomicBool>,
@@ -60,7 +105,7 @@ async fn handle_client(
                             buf.push(data);
                         } else {
                             let msg = serde_json::to_string(&buf).unwrap();
-                            log::debug!("[NET] {addr}> Sending data: {}", msg);
+                            log::debug!("[NET] {addr}> Sending data: {msg}");
                             if let Err(e) = outgoing.send(Message::from(
                                 msg.as_str(),
                             )).await {
@@ -79,7 +124,7 @@ async fn handle_client(
             },
             msg = incoming.next() => {
                 if let Some(Ok(msg)) = msg {
-                    log::info!("[NET] {addr}> Received message: {}", msg);
+                    log::info!("[NET] {addr}> Received message: {msg}");
                     if msg.is_close() {
                         log::info!("[NET] {addr}> Client disconnected.");
                         break;
