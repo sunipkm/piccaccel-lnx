@@ -1,4 +1,4 @@
-use crate::accel::AccelData;
+use crate::AccelData;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
