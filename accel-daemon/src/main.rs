@@ -61,7 +61,14 @@ async fn main() {
         }
     };
     // Start the TCP server
-    tcp_server(args.port, running, sink).await;
+    let srv_task = tokio::spawn(tcp_server(args.port, running.clone(), sink));
+    log::info!("TCP server started on port {}", args.port);
+    // Wait
+    while running.load(Ordering::Relaxed) {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
+    log::info!("Stopping TCP server...");
+    srv_task.abort();
     log::info!("Server stopped, exiting...");
     // Clean up GPIO pins
     for mut pin in pins.drain(..) {
@@ -70,5 +77,10 @@ async fn main() {
         } else {
             log::info!("Cleared async interrupt for {pin:?}");
         }
+    }
+    if let Err(e) = srv_task.await {
+        log::error!("TCP server task failed: {e}");
+    } else {
+        log::info!("TCP server task completed successfully");
     }
 }

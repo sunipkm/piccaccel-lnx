@@ -112,8 +112,14 @@ fn accelerator_callback(
         .unwrap_or(0);
 
     if let Ok(data) = device.accel_norm() {
-        if let Err(e) = sink.send((index, gap, data).into()) {
-            log::error!("Failed to send accelerometer data: {e}");
+        if sink.receiver_count() > 0 && sink.send(AccelData {
+            idx: index,
+            gap,
+            x: data.x,
+            y: data.y,
+            z: data.z,
+        }).is_err() {
+            log::error!("Failed to send accelerometer data for device at index {index}");
         }
     } else {
         log::error!("Failed to read accelerometer data from device at index {index}",);

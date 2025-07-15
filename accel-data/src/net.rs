@@ -1,10 +1,12 @@
-use crate::{AccelData};
+use crate::AccelData;
+use futures_util::{SinkExt, stream::StreamExt};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::io::AsyncWriteExt;
+// use futures_util::
 use tokio::sync::broadcast::Sender;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 pub async fn tcp_server(port: u16, running: Arc<AtomicBool>, sink: Sender<AccelData>) {
     log::info!("[NET] Starting TCP server on port {port}");
@@ -37,24 +39,61 @@ async fn handle_client(
     sink: Sender<AccelData>,
 ) {
     log::info!("[NET] {addr}> Handling client.");
+    let ws_stream = match tokio_tungstenite::accept_async(socket).await {
+        Ok(ws_stream) => ws_stream,
+        Err(e) => {
+            log::error!("[NET] {addr}> Failed to upgrade connection: {e}");
+            return;
+        }
+    };
+    let (mut outgoing, mut incoming) = ws_stream.split();
     let mut source = sink.subscribe();
-    let (_, mut writer) = socket.into_split();
+    let mut counter = 0;
+    let mut now = std::time::Instant::now();
+    let mut buf = Vec::with_capacity(128);
     while running.load(Ordering::Relaxed) {
-        match source.recv().await {
-            Ok(data) => {
-                if writer
-                    .write_all(data.as_bytes())
-                    .await
-                    .is_err()
-                {
-                    log::error!("[NET] {addr}> Failed to write data to client");
+        tokio::select! {
+            msg = source.recv() => {
+                match msg {
+                    Ok(data) => {
+                        if buf.len() < buf.capacity() {
+                            buf.push(data);
+                        } else {
+                            let msg = serde_json::to_string(&buf).unwrap();
+                            log::debug!("[NET] {addr}> Sending data: {}", msg);
+                            if let Err(e) = outgoing.send(Message::from(
+                                msg.as_str(),
+                            )).await {
+                                log::error!("[NET] {addr}> Error sending data: {e}");
+                                break;
+                            }
+                            buf.clear();
+                        }
+                        counter += 1;
+                    }
+                    Err(e) => {
+                        log::error!("[NET] {addr}> Error receiving data: {e}");
+                        break;
+                    }
+                }
+            },
+            msg = incoming.next() => {
+                if let Some(Ok(msg)) = msg {
+                    log::info!("[NET] {addr}> Received message: {}", msg);
+                    if msg.is_close() {
+                        log::info!("[NET] {addr}> Client disconnected.");
+                        break;
+                    }
+                } else {
+                    log::info!("[NET] {addr}> Client disconnected or error occurred.");
                     break;
                 }
             }
-            Err(e) => {
-                log::error!("[NET] {addr}> Error receiving data: {e}");
-                break;
-            }
+        }
+        if now.elapsed() > std::time::Duration::from_millis(1000) {
+            log::info!("[NET] {addr}> Sent {counter} packets.");
+            counter = 0;
+            now = std::time::Instant::now();
         }
     }
 }

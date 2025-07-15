@@ -6,8 +6,9 @@ use std::{
     time::Instant,
 };
 
-use accel_data::{tcp_server, AccelData};
+use accel_data::{AccelData, tcp_server};
 use clap::Parser;
+use tokio::net::tcp;
 /// Program to forward serial port over TCP
 #[derive(Parser, Debug)]
 #[command(version, about, long_about)]
@@ -22,7 +23,7 @@ struct Args {
     port: u16,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     // Initialize the logger
     env_logger::init();
@@ -43,12 +44,19 @@ async fn main() {
     let (sink, _) = tokio::sync::broadcast::channel(100);
     // Initialize dummy data source
     let gen_task = tokio::spawn(generate_dummy_data(
-        0, // Dummy index
+        1289, // Dummy index
         running.clone(),
         sink.clone(),
     ));
     // Start the TCP server
-    tcp_server(args.port, running, sink).await;
+    let srv_task = tokio::spawn(tcp_server(args.port, running.clone(), sink));
+    log::info!("TCP server started on port {}", args.port);
+    // Wait for the server task to finish
+    while running.load(Ordering::Relaxed) {
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
+    log::info!("Stopping TCP server...");
+    srv_task.abort();
     log::info!("Server stopped, exiting...");
     // Wait for the dummy data generation task to finish
     if let Err(e) = gen_task.await {
@@ -63,6 +71,7 @@ async fn generate_dummy_data(
     running: Arc<AtomicBool>,
     sink: tokio::sync::broadcast::Sender<AccelData>,
 ) {
+    log::info!("Starting dummy data generation for index {idx}");
     let root = Instant::now();
     let mut start = None;
     while running.load(Ordering::Relaxed) {
@@ -86,7 +95,7 @@ async fn generate_dummy_data(
             y: f32::cos(now / 5.0 + 1.0),
             z: f32::tan(now / 5.0 + 2.0).clamp(-2.0, 2.0),
         };
-        if sink.send(data).is_err() {
+        if sink.receiver_count() > 0 && sink.send(data).is_err() {
             log::error!("Failed to send dummy data");
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
