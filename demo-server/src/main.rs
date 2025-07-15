@@ -1,5 +1,3 @@
-mod net;
-
 use std::{
     sync::{
         Arc,
@@ -8,11 +6,8 @@ use std::{
     time::Instant,
 };
 
-use micromath::vector::F32x3;
-use net::tcp_server;
-
+use accel_data::{tcp_server, AccelData};
 use clap::Parser;
-use serde::Serialize;
 /// Program to forward serial port over TCP
 #[derive(Parser, Debug)]
 #[command(version, about, long_about)]
@@ -25,27 +20,6 @@ struct Args {
     )]
     /// Network port to listen on to send commands
     port: u16,
-}
-
-#[derive(Debug, Serialize, Copy, Clone)]
-pub struct AccelData {
-    pub idx: u32,
-    pub gap: u32,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl From<(u32, u32, F32x3)> for AccelData {
-    fn from(val: (u32, u32, F32x3)) -> Self {
-        AccelData {
-            idx: val.0,
-            gap: val.1,
-            x: val.2.x,
-            y: val.2.y,
-            z: val.2.z,
-        }
-    }
 }
 
 #[tokio::main]

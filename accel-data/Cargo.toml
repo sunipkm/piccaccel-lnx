@@ -1,0 +1,18 @@
+[package]
+name = "accel-data"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+bincode = { version = "2.0", features = ["serde"] }
+log = { version = "0.4" }
+micromath = { version = "1.1", features = ["vector"] }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.40", features = [
+    "macros",
+    "sync",
+    "net",
+    "io-util",
+    "rt",
+], default-features = false }
+

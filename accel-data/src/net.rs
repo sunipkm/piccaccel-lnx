@@ -1,4 +1,4 @@
-use crate::accel::AccelData;
+use crate::{AccelData};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -43,7 +43,7 @@ async fn handle_client(
         match source.recv().await {
             Ok(data) => {
                 if writer
-                    .write_all(serde_json::to_string(&data).unwrap().as_bytes())
+                    .write_all(data.as_bytes())
                     .await
                     .is_err()
                 {

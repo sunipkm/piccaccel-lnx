@@ -1,5 +1,4 @@
 mod accel;
-mod net;
 
 use std::sync::{
     Arc,
@@ -7,7 +6,7 @@ use std::sync::{
 };
 
 use accel::{AccelDesc, accelerator_init};
-use net::tcp_server;
+use accel_data::tcp_server;
 
 use clap::Parser;
 use rppal::spi::{Bus, SlaveSelect};

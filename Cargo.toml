@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["accel-daemon", "adxl355-rs", "demo-server"]
+members = ["accel-daemon", "accel-data", "adxl355-rs", "demo-server"]
 
 [workspace.dependencies]
 adxl355 = { path = "adxl355-rs" }
+accel-data = { path = "accel-data" }

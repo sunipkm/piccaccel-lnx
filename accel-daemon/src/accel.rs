@@ -1,8 +1,8 @@
-use adxl355::{Accelerometer, Adxl355, Config as ADXLConfig, F32x3, ODR_LPF, Range};
+use accel_data::AccelData;
+use adxl355::{Accelerometer, Adxl355, Config as ADXLConfig, ODR_LPF, Range};
 use atomic_time::AtomicOptionInstant;
 use rppal::gpio::{Gpio, InputPin};
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
-use serde::Serialize;
 use std::error::Error;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -14,27 +14,6 @@ pub struct AccelDesc {
     pub bus: Bus,
     pub ss: SlaveSelect,
     pub drdy: u8,
-}
-
-#[derive(Debug, Serialize, Copy, Clone)]
-pub struct AccelData {
-    pub idx: u32,
-    pub gap: u32,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl From<(u32, u32, F32x3)> for AccelData {
-    fn from(val: (u32, u32, F32x3)) -> Self {
-        AccelData {
-            idx: val.0,
-            gap: val.1,
-            x: val.2.x,
-            y: val.2.y,
-            z: val.2.z,
-        }
-    }
 }
 
 pub fn accelerator_init(
