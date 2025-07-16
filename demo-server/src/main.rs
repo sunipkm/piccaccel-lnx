@@ -42,8 +42,13 @@ async fn main() {
     // Create a broadcast channel for sending accelerometer data
     let (sink, _) = tokio::sync::broadcast::channel(100);
     // Initialize dummy data source
-    let gen_task = tokio::spawn(generate_dummy_data(
+    let gen_task1 = tokio::spawn(generate_dummy_data(
         1289, // Dummy index
+        running.clone(),
+        sink.clone(),
+    ));
+    let gen_task2 = tokio::spawn(generate_dummy_data(
+        1044, // Another dummy index
         running.clone(),
         sink.clone(),
     ));
@@ -58,7 +63,12 @@ async fn main() {
     srv_task.abort();
     log::info!("Server stopped, exiting...");
     // Wait for the dummy data generation task to finish
-    if let Err(e) = gen_task.await {
+    if let Err(e) = gen_task1.await {
+        log::error!("Dummy data generation task failed: {e}");
+    } else {
+        log::info!("Dummy data generation task completed successfully");
+    }
+    if let Err(e) = gen_task2.await {
         log::error!("Dummy data generation task failed: {e}");
     } else {
         log::info!("Dummy data generation task completed successfully");

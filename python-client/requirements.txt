@@ -1,0 +1,6 @@
+numpy
+matplotlib
+pandas
+dask
+websockets
+pyside6

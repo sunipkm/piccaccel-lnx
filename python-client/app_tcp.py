@@ -1,21 +1,20 @@
 # %%
-from websockets.sync.client import connect
-from dataclasses import dataclass
 import socket
 import struct
 from time import perf_counter_ns
-import time
 from typing import Dict
 from matplotlib.axes import Axes
 from matplotlib.gridspec import GridSpec
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import json
+
+import matplotlib
+matplotlib.use('QtAgg')  # Use TkAgg backend for interactive plotting
 # %%
 DPI = 72
-fig_wid = 1920 / DPI
-fig_hei = 1080 / DPI
+fig_wid = 800 / DPI
+fig_hei = 600 / DPI
 plt.ioff()
 grid = GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1])
 fig = plt.figure(figsize=(fig_wid, fig_hei), dpi=DPI)
@@ -109,10 +108,10 @@ while True:
         for (axm, id) in zip(axs, ids):
             if id in dataframes:
                 df = dataframes[id]
-                if df.empty:
-                    print(f"ID {id}> No data available")
-                else:
-                    print(f"ID {id}> {len(df)} total points")
+                # if df.empty:
+                #     print(f"ID {id}> No data available")
+                # else:
+                #     print(f"ID {id}> {len(df)} total points")
                 now = df['tstamp'].iloc[-1]
                 sel = df['tstamp'] > (now - 1e6)  # Show last second of data
                 tstamp = df['tstamp'][sel]  # Convert to milliseconds
@@ -143,8 +142,8 @@ while True:
                     dymin = -1
                 if np.isnan(dymax):
                     dymax = 1
-                print(f"ID {id}> {len(tstamp)} points, time range {tstamp.iloc[0]} to {tstamp.iloc[-1]} ms")
-                print(f'ID {id}> Y-axis limits: Y: ({ymin}, {ymax}), dY: ({dymin}, {dymax})')
+                # print(f"ID {id}> {len(tstamp)} points, time range {tstamp.iloc[0]} to {tstamp.iloc[-1]} ms")
+                # print(f'ID {id}> Y-axis limits: Y: ({ymin}, {ymax}), dY: ({dymin}, {dymax})')
                 for aid, ax in enumerate(axm):
                     ax.clear()
                     if aid == 0:
