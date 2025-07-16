@@ -1,4 +1,5 @@
 # %%
+from collections import deque
 from websockets.sync.client import connect
 from time import perf_counter_ns
 from typing import Dict
@@ -11,6 +12,27 @@ import json
 
 import matplotlib
 matplotlib.use('QtAgg')  # Use TkAgg backend for interactive plotting
+# %%
+class DataBuffer:
+    def __init__(self, maxlen=2000):
+        self._data = deque(maxlen=maxlen)
+
+    def append(self, item):
+        self._data.append(item)
+
+    def clear(self):
+        self._data.clear()
+
+    def __getitem__(self, index):
+        return self._data[index]
+    
+    def __len__(self):
+        return len(self._data)
+    
+    def to_dataframe(self, columns=None):
+        if columns is None:
+            columns = ['tstamp', 'x', 'y', 'z', 'dx', 'dy', 'dz']
+        return pd.DataFrame(list(self._data), columns=columns)
 # %%
 DPI = 72
 FIG_WID = 800 / DPI
@@ -62,7 +84,7 @@ def run(addr: str, port: int):
         print(f"Failed to connect to {addr}:{port} - {e}")
         return
 
-    dataframes: Dict[int, pd.DataFrame] = dict()
+    datasets: Dict[int, DataBuffer] = dict()
     packets: Dict[int, int] = dict()  # For debugging purposes
 
     while True:
@@ -85,32 +107,20 @@ def run(addr: str, port: int):
                         except KeyError as e:
                             print(f"Missing key in data: {e}, {data}")
                             continue
-                        if id not in dataframes:
-                            print(
-                                f"Creating new DataFrame: {id}, {gap}, {x}, {y}, {z}")
+                        if id not in datasets:
+                            print(f"Creating new DataBuffer: {id}, {gap}, {x}, {y}, {z}")
                             ids.append(id)
-                            dataframes[id] = pd.DataFrame({
-                                'tstamp': pd.Series(dtype=int),
-                                'x': pd.Series(dtype='float'),
-                                'y': pd.Series(dtype='float'),
-                                'z': pd.Series(dtype='float'),
-                                'dx': pd.Series(dtype='float'),
-                                'dy': pd.Series(dtype='float'),
-                                'dz': pd.Series(dtype='float'),
-                            })
-                            dataframes[id].loc[0] = [gap, x, y, z,
-                                                    np.nan, np.nan, np.nan]  # adding a row
+                            datasets[id] = DataBuffer(maxlen=2000)
+                            datasets[id].append((gap, x, y, z, np.nan, np.nan, np.nan))
                             packets[id] = 1
                         else:
-                            dflen = len(dataframes[id])
-                            last_row = dataframes[id].iloc[dflen - 1]
-                            tstamp = last_row['tstamp'] + gap
+                            tstamp, x0, y0, z0, _, _, _ = datasets[id][-1]
+                            tstamp += gap
                             gap *= 1e-6  # Convert to seconds
-                            dx = (x - last_row['x']) / gap
-                            dy = (y - last_row['y']) / gap
-                            dz = (z - last_row['z']) / gap
-                            dataframes[id].loc[dflen] = [tstamp, x,
-                                                    y, z, dx, dy, dz]  # adding a row
+                            dx = (x - x0) / gap
+                            dy = (y - y0) / gap
+                            dz = (z - z0) / gap
+                            datasets[id].append((tstamp, x, y, z, dx, dy, dz))
                             packets[id] += 1
                 except Exception as e:
                     print(f"Error processing data: {e}, {datas}")
@@ -133,12 +143,9 @@ def run(addr: str, port: int):
             # for id in ids:
             #     packets[id] = 0  # Reset packet count for next interval
             for (axm, id) in zip(axs, ids):
-                if id in dataframes:
-                    df = dataframes[id]
-                    if df.empty:
-                        print(f"ID {id}> No data available")
-                    else:
-                        print(f"ID {id}> {len(df)} total points")
+                if id in datasets:
+                    ds = datasets[id]
+                    df = ds.to_dataframe()
                     now = df['tstamp'].iloc[-1]
                     sel = df['tstamp'] > (now - 1e6)  # Show last second of data
                     tstamp = df['tstamp'][sel]  # Convert to milliseconds

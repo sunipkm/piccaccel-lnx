@@ -38,7 +38,7 @@ async fn main() {
     let acceldescs = vec![AccelDesc {
         bus: Bus::Spi1,
         ss: SlaveSelect::Ss2,
-        drdy: 19, // GPIO pin for data ready
+        drdy: 26, // GPIO pin for data ready
     }];
     // Create a running flag
     let running = Arc::new(AtomicBool::new(true));
@@ -53,30 +53,16 @@ async fn main() {
     // Create a broadcast channel for sending accelerometer data
     let (sink, _) = tokio::sync::broadcast::channel(100);
     // Initialize the accelerometer
-    // let mut pins = match accelerator_init(&acceldescs, sink.clone()) {
-    //     Ok(pins) => {
-    //         log::info!("Accelerometer initialized with {} pins", pins.len());
-    //         pins
-    //     }
-    //     Err(e) => {
-    //         log::error!("Failed to initialize accelerometer: {e}");
-    //         return;
-    //     }
-    // };
-    let hdls = acceldescs
-        .iter()
-        .enumerate()
-        .map(|(index, acceldesc)| {
-            let sink = sink.clone();
-            let acceldesc = acceldesc.clone();
-            tokio::spawn({
-                let running = running.clone();
-                async move {
-                    accelerator_task(index as u32, acceldesc, sink, running).await;
-                }
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut pins = match accelerator_init(&acceldescs, sink.clone()) {
+        Ok(pins) => {
+            log::info!("Accelerometer initialized with {} pins", pins.len());
+            pins
+        }
+        Err(e) => {
+            log::error!("Failed to initialize accelerometer: {e}");
+            return;
+        }
+    };
     // Start the TCP server
     let srv_task = tokio::spawn(tcp_server(args.port, running.clone(), sink));
     log::info!("TCP server started on port {}", args.port);
@@ -88,16 +74,11 @@ async fn main() {
     srv_task.abort();
     log::info!("Server stopped, exiting...");
     // Clean up GPIO pins
-    // for mut pin in pins.drain(..) {
-    //     if let Err(e) = pin.clear_async_interrupt() {
-    //         log::error!("Failed to clear async interrupt for {pin:?}: {e}");
-    //     } else {
-    //         log::info!("Cleared async interrupt for {pin:?}");
-    //     }
-    // }
-    for hdl in hdls {
-        if let Err(e) = hdl.await {
-            log::error!("Accelerometer initialization task failed: {e}");
+    for mut pin in pins.drain(..) {
+        if let Err(e) = pin.clear_async_interrupt() {
+            log::error!("Failed to clear async interrupt for {pin:?}: {e}");
+        } else {
+            log::info!("Cleared async interrupt for {pin:?}");
         }
     }
     if let Err(e) = srv_task.await {

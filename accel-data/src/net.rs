@@ -8,6 +8,37 @@ use std::sync::{
 use tokio::{io::AsyncWriteExt, sync::broadcast::Sender};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
+pub async fn udp_server(port: u16, running: Arc<AtomicBool>, sink: Sender<AccelData>) {
+    log::info!("[NET] Starting UDP server on port {port}");
+    let listener = tokio::net::UdpSocket::bind(format!("0.0.0.0:{port}"))
+        .await
+        .expect("[NET] Failed to bind UDP listener");
+    log::info!("[NET] UDP server listening on port {port}");
+    let mut source = sink.subscribe();
+    while running.load(Ordering::Relaxed) {
+        let mut buf = Vec::with_capacity(1024);
+        match source.recv().await {
+            Ok(data) => {
+                let data = data.as_bytes();
+                if buf.len() + data.len() < buf.capacity() {
+                    buf.extend_from_slice(&data);
+                } else {
+                    if listener.send(&buf).await.is_err() {
+                        log::error!("[NET] Failed to send data over UDP");
+                        break;
+                    }
+                    buf.clear();
+                    buf.extend_from_slice(&data);
+                }
+            }
+            Err(e) => {
+                log::error!("[NET] Failed to receive data: {e}");
+            }
+        }
+    }
+    log::info!("[NET] UDP server stopped");
+}
+
 pub async fn tcp_server(port: u16, running: Arc<AtomicBool>, sink: Sender<AccelData>) {
     log::info!("[NET] Starting TCP server on port {port}");
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
@@ -42,35 +73,35 @@ async fn handle_client_tcp(
     log::info!("[NET] {addr}> Handling client.");
     let (_, mut writer) = socket.into_split();
     let mut source = sink.subscribe();
-    let mut buf = Vec::with_capacity(128 * std::mem::size_of::<AccelData>());
+    let mut buf = Vec::with_capacity(1024);
     let mut counter = 0;
+    let mut now = std::time::Instant::now();
 
     while running.load(Ordering::Relaxed) {
-        tokio::select! {
-            msg = source.recv() => {
-                match msg {
-                    Ok(data) => {
-                        if buf.len() < buf.capacity() {
-                            buf.extend_from_slice(&data.as_bytes());
-                        } else {
-                            log::debug!("[NET] {addr}> Sending data.");
-                            if writer.write_all(&buf).await.is_err() {
-                                log::error!("[NET] {addr}> Error sending data");
-                                break;
-                            }
-                            buf.clear();
-                        }
-                        counter += 1;
-                    }
-                    Err(e) => {
-                        log::error!("[NET] {addr}> Error receiving data: {e}");
+        match source.recv().await {
+            Ok(data) => {
+                let data = data.as_bytes();
+                if buf.len() + data.len() < buf.capacity() {
+                    buf.extend_from_slice(&data);
+                } else {
+                    if writer.write_all(&buf).await.is_err() {
+                        log::error!("[NET] {addr}> Error sending data");
                         break;
                     }
+                    let nnow = std::time::Instant::now();
+                    let dur = nnow.duration_since(now).as_secs_f32();
+                    if dur > 1.0 {
+                        log::info!("[NET] {addr}> Packet rate: {} packets/s", counter as f32 / dur);
+                        now = nnow;
+                        counter = 0;
+                    }
+                    buf.clear();
+                    buf.extend_from_slice(&data);
                 }
-            },
-            _ = tokio::time::sleep(tokio::time::Duration::from_millis(1000)) => {
-                log::info!("[NET] {addr}> Sent {counter} packets.");
-                counter = 0;
+                counter += 1;
+            }
+            Err(e) => {
+                log::error!("[NET] {addr}> Error receiving data: {e}");
             }
         }
     }
@@ -101,7 +132,7 @@ async fn handle_client_wsock(
             msg = source.recv() => {
                 match msg {
                     Ok(data) => {
-                        if buf.len() < buf.capacity() {
+                        if buf.len() + 1 < buf.capacity() {
                             buf.push(data);
                         } else {
                             let msg = serde_json::to_string(&buf).unwrap();
@@ -113,6 +144,7 @@ async fn handle_client_wsock(
                                 break;
                             }
                             buf.clear();
+                            buf.push(data);
                         }
                         counter += 1;
                     }

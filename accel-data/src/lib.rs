@@ -1,7 +1,7 @@
 use micromath::vector::F32x3;
 mod net;
 
-pub use net::tcp_server;
+pub use net::{tcp_server, udp_server};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
