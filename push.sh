@@ -45,34 +45,6 @@ if [[ -z "$REMOTE_HOST" ]]; then
     show_help
 fi
 
-if $FORCE; then
-    echo "Force mode enabled. All files will be pushed."
-else
-    echo "Normal mode. Only new or modified files will be pushed."
-fi
+# ssh $REMOTE_HOST date -s @$(date -u +"%s")
 
-TARGET="armv7-unknown-linux-gnueabihf"
-REMOTE_TARGET=$(ssh $REMOTE_HOST uname -m)
-if [ $? -eq 0 ]; then
-    if [ $REMOTE_TARGET = "aarch64" ]; then
-        echo "Remote system is ARM64."
-        TARGET="aarch64-unknown-linux-gnu"
-    fi
-fi
-cross build --target $TARGET --release
-ssh $REMOTE_HOST -t 'mkdir -p ~/thermo-server'
-ssh -q $REMOTE_HOST -t 'stat "thermo-server/thermo-server" &> /dev/null'
-if [ $? -ne 0 ] || $FORCE; then
-    scp target/$TARGET/release/thermo-server $REMOTE_HOST:~/thermo-server
-else
-    echo "Not updating server binary."
-fi
-scp target/$TARGET/release/thermo-tester $REMOTE_HOST:~/thermo-server
-scp target/$TARGET/release/humi-tester $REMOTE_HOST:~/thermo-server
-scp target/$TARGET/release/thermo-ident $REMOTE_HOST:~/thermo-server
-scp target/$TARGET/release/thermo-cputemp $REMOTE_HOST:~/thermo-server
-ssh -q $REMOTE_HOST -t 'stat "thermo-server/thermo.env" &> /dev/null'
-if [ $? -ne 0 ]; then
-    scp thermo.env thermo.service $REMOTE_HOST:~/thermo-server
-fi
-scp disable_ethernet_gadget.sh $REMOTE_HOST:~/thermo-server
+rsync -vhra . $REMOTE_HOST:~/piccaccel-lnx/ --include='**.gitignore' --exclude='/.git' --filter=':- .gitignore' --delete-after

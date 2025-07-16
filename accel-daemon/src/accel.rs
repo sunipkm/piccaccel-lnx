@@ -1,15 +1,19 @@
+#![allow(dead_code)]
 use accel_data::AccelData;
 use adxl355::{Accelerometer, Adxl355, Config as ADXLConfig, ODR_LPF, Range};
 use atomic_time::AtomicOptionInstant;
 use rppal::gpio::{Gpio, InputPin};
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 use std::error::Error;
-use std::sync::atomic::Ordering;
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast::Sender;
 
 const ACCEL_ODR: ODR_LPF = ODR_LPF::ODR_1000_Hz;
 
+#[derive(Debug, Clone)]
 pub struct AccelDesc {
     pub bus: Bus,
     pub ss: SlaveSelect,
@@ -49,13 +53,24 @@ pub fn accelerator_init(
                             log::error!("Failed to start accel: {e}");
                             None
                         } else if let Err(e) = {
+                            thread::sleep(Duration::from_millis(100));
+                            if let Ok(value) = accel.accel_norm() {
+                                log::info!("Accelerometer {acceldesc:?} data: {value:?}");
+                            }
                             let sink = sink.clone();
                             let past = AtomicOptionInstant::none();
+                            let triggered = AtomicBool::new(false);
                             drdy.set_async_interrupt(
                                 rppal::gpio::Trigger::FallingEdge,
                                 None,
                                 move |_| {
-                                    accelerator_callback(index as u32, &mut accel, &past, &sink)
+                                    accelerator_callback(
+                                        index as u32,
+                                        &mut accel,
+                                        &past,
+                                        &sink,
+                                        &triggered,
+                                    )
                                 },
                             )
                         } {
@@ -104,7 +119,12 @@ fn accelerator_callback(
     device: &mut Adxl355<Spi>,
     past: &AtomicOptionInstant,
     sink: &Sender<AccelData>,
+    triggered: &AtomicBool,
 ) {
+    if !triggered.load(Ordering::Relaxed) {
+        triggered.store(true, Ordering::Relaxed);
+        log::debug!("Accelerometer callback triggered for device at index {index}");
+    }
     let now = Instant::now();
     let gap = past
         .swap(Some(now), Ordering::Relaxed)
@@ -112,16 +132,85 @@ fn accelerator_callback(
         .unwrap_or(0);
 
     if let Ok(data) = device.accel_norm() {
-        if sink.receiver_count() > 0 && sink.send(AccelData {
-            idx: index,
-            gap,
-            x: data.x,
-            y: data.y,
-            z: data.z,
-        }).is_err() {
+        if sink.receiver_count() > 0
+            && sink
+                .send(AccelData {
+                    idx: index,
+                    gap,
+                    x: data.x,
+                    y: data.y,
+                    z: data.z,
+                })
+                .is_err()
+        {
             log::error!("Failed to send accelerometer data for device at index {index}");
         }
     } else {
         log::error!("Failed to read accelerometer data from device at index {index}",);
+    }
+}
+
+pub async fn accelerator_task(
+    index: u32,
+    acceldesc: AccelDesc,
+    sink: Sender<AccelData>,
+    running: Arc<AtomicBool>,
+) {
+    if let Ok(spi) = Spi::new(
+        acceldesc.bus,
+        acceldesc.ss,
+        1_000_000, // 1 MHz
+        Mode::Mode0,
+    ) {
+        if let Ok(mut accel) = adxl355::Adxl355::new(
+            spi,
+            ADXLConfig::default()
+                .odr(ACCEL_ODR)
+                .hpf(adxl355::HPF_CORNER::_0_238_ODR)
+                .range(Range::_2G),
+        ) {
+            if let Err(e) = accel.start() {
+                log::error!("Failed to start accel: {e}");
+            } else {
+                thread::sleep(Duration::from_millis(100));
+                if let Ok(value) = accel.accel_norm() {
+                    log::info!("Accelerometer {acceldesc:?} data: {value:?}");
+                }
+                while running.load(Ordering::Relaxed) {
+                    if let Ok(data) = accel.accel_norm() {
+                        if sink.receiver_count() > 0
+                            && sink
+                                .send(AccelData {
+                                    idx: index,
+                                    gap: 0, // No gap for periodic task
+                                    x: data.x,
+                                    y: data.y,
+                                    z: data.z,
+                                })
+                                .is_err()
+                        {
+                            log::error!(
+                                "Failed to send accelerometer data for device at index {index}"
+                            );
+                        }
+                    } else {
+                        log::error!(
+                            "Failed to read accelerometer data from device at index {index}"
+                        );
+                    }
+                    thread::sleep(Duration::from_micros(900)); // Adjust as needed
+                }
+            }
+        } else {
+            log::error!(
+                "Failed to create ADXL355 instance on bus {:?}",
+                acceldesc.bus
+            );
+        }
+    } else {
+        log::error!(
+            "Failed to create ADXL355 instance on bus {:?}",
+            acceldesc.bus
+        );
     }
 }
