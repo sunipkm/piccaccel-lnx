@@ -99,17 +99,12 @@ def run(addr: str, port: int):
     packets: Dict[int, int] = dict()  # For debugging purposes
     ncfile = Dataset(f"{datetime.now():%Y%m%d_%H%M%S}.nc",
                      'w', format='NETCDF4')
-    ncfile.createDimension('id', None)
-    ncid = ncfile.createVariable('id', 'i4', ('id',), zlib=True)
-    nctime = ncfile.createVariable('time', 'f8', ('id',), zlib=True)
-    ncx = ncfile.createVariable('x', 'f4', ('id',), zlib=True)
-    ncy = ncfile.createVariable('y', 'f4', ('id',), zlib=True)
-    ncz = ncfile.createVariable('z', 'f4', ('id',), zlib=True)
 
     while True:
         try:
             bytes = client.recv(20)
             (id, gap, x, y, z) = struct.unpack('<IIfff', bytes)
+            gap *= 1e-6 # Convert gap to seconds
             if id not in datasets:
                 print(f"Creating new DataBuffer: {id}, {gap}, {x}, {y}, {z}")
                 ids.append(id)
@@ -119,7 +114,6 @@ def run(addr: str, port: int):
             else:
                 tstamp, x0, y0, z0, _, _, _ = datasets[id][-1]
                 tstamp += gap
-                gap *= 1e-6  # Convert to seconds
                 dx = (x - x0) / gap
                 dy = (y - y0) / gap
                 dz = (z - z0) / gap
@@ -137,27 +131,34 @@ def run(addr: str, port: int):
                         if df.empty:
                             print(f"ID {id}> No data available")
                             continue
-                        if id not in np.array(ncid[:]):
-                            idx = len(ncid)
-                            ncid[idx] = id
-                            nctime[idx] = df['tstamp'].values # type: ignore
-                            ncx[idx] = df['x'].values # type: ignore
-                            ncy[idx] = df['y'].values # type: ignore
-                            ncz[idx] = df['z'].values # type: ignore
+                        if str(id) not in ncfile.groups.keys():
+                            print(f"Creating NetCDF group for ID {id}")
+                            group = ncfile.createGroup(str(id))
+                            group.createDimension('tstamp', None)
+                            nctime = group.createVariable('tstamp', 'f8', ('tstamp',), compression='zlib')
+                            ncx = group.createVariable('x', 'f4', ('tstamp',), compression='zlib')
+                            ncy = group.createVariable('y', 'f4', ('tstamp',), compression='zlib')
+                            ncz = group.createVariable('z', 'f4', ('tstamp',), compression='zlib')
+                            nctime[:] = df['tstamp'].values  # type: ignore
+                            ncx[:] = df['x'].values  # type: ignore
+                            ncy[:] = df['y'].values  # type: ignore
+                            ncz[:] = df['z'].values  # type: ignore
                         else:
-                            idx = np.where(ncid[:] == id)[0][0]
-                            nctime[idx] = df['tstamp'].values # type: ignore
-                            ncx[idx] = df['x'].values # type: ignore
-                            ncy[idx] = df['y'].values # type: ignore
-                            ncz[idx] = df['z'].values # type: ignore
-                        # ncfile.variables['dz'][:, len(ids) - 1] = df['dz'].value
-                        # else:
-                        #     print(f"ID {id}> {len(df)} total points")
+                            group = ncfile.groups[str(id)]
+                            nctime = group.variables['tstamp']
+                            ncx = group.variables['x']
+                            ncy = group.variables['y']
+                            ncz = group.variables['z']
+                            dlen = len(nctime)
+                            nctime[dlen:] = df['tstamp'].values  # type: ignore
+                            ncx[dlen:] = df['x'].values  # type: ignore
+                            ncy[dlen:] = df['y'].values  # type: ignore
+                            ncz[dlen:] = df['z'].values  # type: ignore
                         now = df['tstamp'].iloc[-1]
                         # Show last second of data
-                        sel = df['tstamp'] > (now - 1e6)
+                        sel = df['tstamp'] > (now - 1)
                         tstamp = df['tstamp'][sel]  # Convert to milliseconds
-                        tstamp = tstamp * 1e-6  # Convert to seconds
+                        # tstamp = tstamp * 1e-6  # Convert to seconds
                         tstamp -= tstamp.iloc[-1]
                         tstamp *= 1e3  # Convert to milliseconds for plotting
                         ymin_x = np.nanmin(df['x'][sel])
