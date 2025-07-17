@@ -4,3 +4,4 @@ pandas
 dask
 websockets
 pyside6
+netcdf4
