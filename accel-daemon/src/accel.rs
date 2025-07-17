@@ -176,13 +176,17 @@ pub async fn accelerator_task(
                 if let Ok(value) = accel.accel_norm() {
                     log::info!("Accelerometer {acceldesc:?} data: {value:?}");
                 }
+                let mut now = Instant::now();
                 while running.load(Ordering::Relaxed) {
                     if let Ok(data) = accel.accel_norm() {
+                        let tnow = Instant::now();
+                        let dur = tnow.duration_since(now).as_micros() as u32;
+                        now = tnow;
                         if sink.receiver_count() > 0
                             && sink
                                 .send(AccelData {
                                     idx: index,
-                                    gap: 0, // No gap for periodic task
+                                    gap: dur,
                                     x: data.x,
                                     y: data.y,
                                     z: data.z,
