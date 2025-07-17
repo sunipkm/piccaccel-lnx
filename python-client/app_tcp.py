@@ -231,6 +231,7 @@ def run(addr: str, port: int):
     print("Done receiving data")
     ncfile.close()
     print("NetCDF file closed")
+    plt.ion()
 
 
 # %%

@@ -35,11 +35,18 @@ async fn main() {
     log::info!("Arguments: {args:#?}");
     // Accelerometer descriptors
     #[allow(clippy::useless_vec)]
-    let acceldescs = vec![AccelDesc {
-        bus: Bus::Spi1,
-        ss: SlaveSelect::Ss2,
-        drdy: 26, // GPIO pin for data ready
-    }];
+    let acceldescs = vec![
+        AccelDesc {
+            bus: Bus::Spi0,
+            ss: SlaveSelect::Ss0,
+            drdy: 25, // GPIO pin for data ready
+        },
+        AccelDesc {
+            bus: Bus::Spi1,
+            ss: SlaveSelect::Ss2,
+            drdy: 26, // GPIO pin for data ready
+        },
+    ];
     // Create a running flag
     let running = Arc::new(AtomicBool::new(true));
     // Handle Ctrl+C to stop the server gracefully

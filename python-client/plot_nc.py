@@ -6,7 +6,10 @@ import numpy as np
 def plot_nc(filename):
     ncfile = Dataset(filename, 'r')
     glen = len(ncfile.groups)
+    plt.ion()
     fig, axs = plt.subplots(glen, 1, dpi = 150)
+    if not isinstance(axs, np.ndarray):
+        axs = [axs]
     for gname, ax in zip(ncfile.groups.keys(), axs):
         print(f"Plotting group: {gname}")
         group = ncfile.groups[gname]
