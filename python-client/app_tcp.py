@@ -1,8 +1,9 @@
 # %%
+from pathlib import Path
 import socket
 import struct
 from time import perf_counter_ns
-from typing import Dict
+from typing import Dict, Optional
 from matplotlib.axes import Axes
 from matplotlib.gridspec import GridSpec
 import numpy as np
@@ -11,6 +12,7 @@ import matplotlib.pyplot as plt
 from collections import deque
 from netCDF4 import Dataset
 from datetime import datetime
+from matplotlib.widgets import Button
 
 import matplotlib
 matplotlib.use('QtAgg')  # Use TkAgg backend for interactive plotting
@@ -38,6 +40,31 @@ class DataBuffer:
             columns = ['tstamp', 'x', 'y', 'z', 'dx', 'dy', 'dz']
         return pd.DataFrame(list(self._data), columns=columns)
 
+class NcDatase:
+    def __init__(self, dir: Path, axis: Axes):
+        self.ncfile: Optional[Dataset] = None
+        self.button = Button(axis, 'Save')
+        self.button.on_clicked(self.callback)
+        self._dir = dir
+        if not self._dir.exists():
+            self._dir.mkdir(parents=True, exist_ok=True)
+    
+    def callback(self, evt):
+        if self.ncfile is not None:
+            self.button.label.set_text('Save')
+            self.ncfile.close()
+            self.ncfile = None
+        else:
+            self.button.label.set_text('Close')
+            self.ncfile = Dataset(self._dir / f"{datetime.now():%Y%m%d_%H%M%S}.nc", 'w', format='NETCDF4')
+    
+    def close(self):
+        if self.ncfile is not None:
+            self.ncfile.close()
+            self.ncfile = None
+        else:
+            print("No NetCDF file to close")
+        
 
 # %%
 DPI = 72
@@ -47,17 +74,20 @@ FIG_HEI = 600 / DPI
 
 def run(addr: str, port: int):
     plt.ioff()
-    grid = GridSpec(2, 2, width_ratios=[1, 1], height_ratios=[
-                    1, 1], left=0.065, bottom=0.065)
+    grid = GridSpec(3, 2, width_ratios=[1, 1], height_ratios=[
+                    0.025, 1, 1], left=0.065, bottom=0.065)
     fig = plt.figure(figsize=(FIG_WID, FIG_HEI), dpi=DPI)
+    button_ax = fig.add_subplot(grid[0, :])
+    button_ax.set_axis_off()
+    ncfile = NcDatase(Path.cwd() / 'data', button_ax)
     axs = []
     for i in range(2):
         axs.append([])
         for j in range(2):
             if i > 0:
-                ax = fig.add_subplot(grid[i, j], sharex=axs[0][j])
+                ax = fig.add_subplot(grid[i+1, j], sharex=axs[0][j])
             else:
-                ax = fig.add_subplot(grid[i, j])
+                ax = fig.add_subplot(grid[i+1, j])
             axs[i].append(ax)
     axs = np.asarray(axs)
     for ax in axs[:-1, :].flatten():
@@ -97,8 +127,8 @@ def run(addr: str, port: int):
     # Use DataBuffer for efficient data handling
     datasets: Dict[int, DataBuffer] = dict()
     packets: Dict[int, int] = dict()  # For debugging purposes
-    ncfile = Dataset(f"{datetime.now():%Y%m%d_%H%M%S}.nc",
-                     'w', format='NETCDF4')
+    # Dataset(f"{datetime.now():%Y%m%d_%H%M%S}.nc",
+                    #  'w', format='NETCDF4')
 
     while True:
         try:
@@ -108,7 +138,7 @@ def run(addr: str, port: int):
             if id not in datasets:
                 print(f"Creating new DataBuffer: {id}, {gap}, {x}, {y}, {z}")
                 ids.append(id)
-                datasets[id] = DataBuffer(maxlen=2000)
+                datasets[id] = DataBuffer(maxlen=20000)
                 datasets[id].append((gap, x, y, z, np.nan, np.nan, np.nan))
                 packets[id] = 1
             else:
@@ -131,29 +161,30 @@ def run(addr: str, port: int):
                         if df.empty:
                             print(f"ID {id}> No data available")
                             continue
-                        if str(id) not in ncfile.groups.keys():
-                            print(f"Creating NetCDF group for ID {id}")
-                            group = ncfile.createGroup(str(id))
-                            group.createDimension('tstamp', None)
-                            nctime = group.createVariable('tstamp', 'f8', ('tstamp',), compression='zlib')
-                            ncx = group.createVariable('x', 'f4', ('tstamp',), compression='zlib')
-                            ncy = group.createVariable('y', 'f4', ('tstamp',), compression='zlib')
-                            ncz = group.createVariable('z', 'f4', ('tstamp',), compression='zlib')
-                            nctime[:] = df['tstamp'].values  # type: ignore
-                            ncx[:] = df['x'].values  # type: ignore
-                            ncy[:] = df['y'].values  # type: ignore
-                            ncz[:] = df['z'].values  # type: ignore
-                        else:
-                            group = ncfile.groups[str(id)]
-                            nctime = group.variables['tstamp']
-                            ncx = group.variables['x']
-                            ncy = group.variables['y']
-                            ncz = group.variables['z']
-                            dlen = len(nctime)
-                            nctime[dlen:] = df['tstamp'].values  # type: ignore
-                            ncx[dlen:] = df['x'].values  # type: ignore
-                            ncy[dlen:] = df['y'].values  # type: ignore
-                            ncz[dlen:] = df['z'].values  # type: ignore
+                        if ncfile.ncfile is not None:
+                            if str(id) not in ncfile.ncfile.groups.keys():
+                                print(f"Creating NetCDF group for ID {id}")
+                                group = ncfile.ncfile.createGroup(str(id))
+                                group.createDimension('tstamp', None)
+                                nctime = group.createVariable('tstamp', 'f8', ('tstamp',), compression='zlib')
+                                ncx = group.createVariable('x', 'f4', ('tstamp',), compression='zlib')
+                                ncy = group.createVariable('y', 'f4', ('tstamp',), compression='zlib')
+                                ncz = group.createVariable('z', 'f4', ('tstamp',), compression='zlib')
+                                nctime[:] = df['tstamp'].values  # type: ignore
+                                ncx[:] = df['x'].values  # type: ignore
+                                ncy[:] = df['y'].values  # type: ignore
+                                ncz[:] = df['z'].values  # type: ignore
+                            else:
+                                group = ncfile.ncfile.groups[str(id)]
+                                nctime = group.variables['tstamp']
+                                ncx = group.variables['x']
+                                ncy = group.variables['y']
+                                ncz = group.variables['z']
+                                dlen = len(nctime)
+                                nctime[dlen:] = df['tstamp'].values  # type: ignore
+                                ncx[dlen:] = df['x'].values  # type: ignore
+                                ncy[dlen:] = df['y'].values  # type: ignore
+                                ncz[dlen:] = df['z'].values  # type: ignore
                         now = df['tstamp'].iloc[-1]
                         # Show last second of data
                         sel = df['tstamp'] > (now - 1)
