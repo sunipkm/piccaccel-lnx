@@ -138,7 +138,7 @@ def run(addr: str, port: int):
             if id not in datasets:
                 print(f"Creating new DataBuffer: {id}, {gap}, {x}, {y}, {z}")
                 ids.append(id)
-                datasets[id] = DataBuffer(maxlen=20000)
+                datasets[id] = DataBuffer(maxlen=5000)
                 datasets[id].append((gap, x, y, z, np.nan, np.nan, np.nan))
                 packets[id] = 1
             else:

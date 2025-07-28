@@ -91,7 +91,7 @@ async fn handle_client_tcp(
                     let nnow = std::time::Instant::now();
                     let dur = nnow.duration_since(now).as_secs_f32();
                     if dur > 1.0 {
-                        log::info!("[NET] {addr}> Packet rate: {} packets/s", counter as f32 / dur);
+                        log::info!("[NET] {addr}> Packet rate: {:.3} packets/s", counter as f32 / dur);
                         now = nnow;
                         counter = 0;
                     }

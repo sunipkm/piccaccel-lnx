@@ -6,7 +6,7 @@ use rppal::gpio::{Gpio, InputPin};
 use rppal::spi::{Bus, Mode, SlaveSelect, Spi};
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::Sender;
@@ -18,6 +18,11 @@ pub struct AccelDesc {
     pub bus: Bus,
     pub ss: SlaveSelect,
     pub drdy: u8,
+}
+
+struct AccelDataRate {
+    last: AtomicOptionInstant,
+    count: AtomicUsize,
 }
 
 pub fn accelerator_init(
@@ -60,6 +65,10 @@ pub fn accelerator_init(
                             let sink = sink.clone();
                             let past = AtomicOptionInstant::none();
                             let triggered = AtomicBool::new(false);
+                            let datarate = AccelDataRate {
+                                last: AtomicOptionInstant::none(),
+                                count: AtomicUsize::new(0),
+                            };
                             drdy.set_async_interrupt(
                                 rppal::gpio::Trigger::FallingEdge,
                                 None,
@@ -70,6 +79,7 @@ pub fn accelerator_init(
                                         &past,
                                         &sink,
                                         &triggered,
+                                        &datarate,
                                     )
                                 },
                             )
@@ -120,6 +130,7 @@ fn accelerator_callback(
     past: &AtomicOptionInstant,
     sink: &Sender<AccelData>,
     triggered: &AtomicBool,
+    datarate: &AccelDataRate,
 ) {
     if !triggered.load(Ordering::Relaxed) {
         triggered.store(true, Ordering::Relaxed);
@@ -130,6 +141,16 @@ fn accelerator_callback(
         .swap(Some(now), Ordering::Relaxed)
         .map(|past| now.duration_since(past).as_micros() as u32)
         .unwrap_or(0);
+    datarate.last.compare_exchange(None, Some(now), Ordering::Relaxed, Ordering::Relaxed).ok(); // Update last timestamp if it was None
+    datarate.count.fetch_add(1, Ordering::Relaxed); // Increment count
+    if let Some(last) = datarate.last.load(Ordering::Relaxed) {
+        let elapsed = now.duration_since(last).as_secs_f32();
+        if elapsed > 1.0 {
+            datarate.last.store(Some(now), Ordering::Relaxed); // Update last timestamp
+            let count = datarate.count.swap(0, Ordering::Relaxed); // Reset count
+            log::debug!("[ACCEL] Device {index} data rate: {:.3} Hz", count as f32 / elapsed);
+        }
+    }
 
     if let Ok(data) = device.accel_norm() {
         if sink.receiver_count() > 0
