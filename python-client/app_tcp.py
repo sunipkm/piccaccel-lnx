@@ -94,7 +94,7 @@ def run(queue: Queue, winsize: int = 1000):
     text_ax.set_axis_off()
     curtime = text_ax.text(
         0.5, 0.5, "Accelerometer Data: Waiting for data...",
-        fontsize=14, ha='center', va='center', animated=True
+        fontsize=14, ha='center', va='center'
     )
     button_ax = fig.add_subplot(grid[1, 3:5])
     # button_ax.set_axis_off()
@@ -108,6 +108,7 @@ def run(queue: Queue, winsize: int = 1000):
                 ax = fig.add_subplot(grid[i+2, ar], sharex=axs[0][j])
             else:
                 ax = fig.add_subplot(grid[i+2, ar])
+            ax.autoscale(enable=True, axis='y')
             axs[i].append(ax)
     axs = np.asarray(axs)
     for ax in axs[:-1, :].flatten():
@@ -145,10 +146,14 @@ def run(queue: Queue, winsize: int = 1000):
                     ax.plot([], [], label='dZ', color='blue', alpha=0.5)[0])
 
     # fig.tight_layout()
-    fig.text(0.025, 0.5, "Acceleration (g)", fontsize=12,
-             ha='center', va='center', rotation='vertical')
-    fig.text(0.9725, 0.5, "Jerk (g/s)", fontsize=12,
-             ha='center', va='center', rotation='vertical', animated=True)
+    fig.text(
+        0.025, 0.5, "Acceleration (g)", fontsize=12,
+        ha='center', va='center', rotation='vertical'
+    )
+    fig.text(
+        0.9725, 0.5, "Jerk (g/s)", fontsize=12,
+        ha='center', va='center', rotation='vertical', animated=True
+    )
 
     fig.show()
 
@@ -181,30 +186,6 @@ def run(queue: Queue, winsize: int = 1000):
                 # tstamp = tstamp * 1e-6  # Convert to seconds
                 tstamp -= tstamp.iloc[-1]
                 tstamp *= 1e3  # Convert to milliseconds for plotting
-                ymin_x = np.nanmin(df['x'][sel])
-                ymax_x = np.nanmax(df['x'][sel])
-                ymin_y = np.nanmin(df['y'][sel])
-                ymax_y = np.nanmax(df['y'][sel])
-                ymin_z = np.nanmin(df['z'][sel])
-                ymax_z = np.nanmax(df['z'][sel])
-                ymin_dx = np.nanmin(df['dx'][sel])
-                ymax_dx = np.nanmax(df['dx'][sel])
-                ymin_dy = np.nanmin(df['dy'][sel])
-                ymax_dy = np.nanmax(df['dy'][sel])
-                ymin_dz = np.nanmin(df['dz'][sel])
-                ymax_dz = np.nanmax(df['dz'][sel])
-                ymin = np.nanmin((ymin_x, ymin_y, ymin_z))
-                ymax = np.nanmax((ymax_x, ymax_y, ymax_z))
-                dymin = np.nanmin((ymin_dx, ymin_dy, ymin_dz))
-                dymax = np.nanmax((ymax_dx, ymax_dy, ymax_dz))
-                if np.isnan(ymin):
-                    ymin = -1
-                if np.isnan(ymax):
-                    ymax = 1
-                if np.isnan(dymin):
-                    dymin = -1
-                if np.isnan(dymax):
-                    dymax = 1
                 for aid, (lline, ax) in enumerate(zip(llines, axm)):
                     lline: list = lline
                     ax: Axes = ax
@@ -217,8 +198,6 @@ def run(queue: Queue, winsize: int = 1000):
                         lline[0].set_data(tstamp, df['dx'][sel])
                         lline[1].set_data(tstamp, df['dy'][sel])
                         lline[2].set_data(tstamp, df['dz'][sel])
-                        if not (np.isnan(dymin) and np.isnan(dymax)):
-                            ax.set_ylim(dymin, dymax)
                     ax.relim()
                     ax.autoscale_view()
         except Empty:
@@ -226,7 +205,7 @@ def run(queue: Queue, winsize: int = 1000):
         return artists
 
     animation = FuncAnimation(
-        fig, update, blit=True,
+        fig, update, blit=False,
         repeat=False, save_count=100,
         interval=100
     )
