@@ -64,6 +64,32 @@ class NcDatase:
             self.ncfile = None
         else:
             print("No NetCDF file to close")
+
+class DataRate:
+    def __init__(self, update_rate: float = 2.0):
+        self.count = 0
+        self.last = None  # Last timestamp for calculating data rate
+        self.update_rate = update_rate
+
+    def update(self, num_samples: int = 1):
+        now = perf_counter_ns()
+        self.count += num_samples
+        if self.last is None:
+            self.last = now
+            return
+        elapsed = (now - self.last) / 1e9
+        if elapsed > 2.0:  # Update every second
+            rate = self.count * 8 / elapsed
+            self.last = now
+            self.count = 0
+            unit = 'bps'
+            if rate > 1024:
+                rate /= 1024
+                unit = 'Kbps'
+            elif rate > 1024*1024:
+                rate /= 1024*1024
+                unit = 'Mbps'
+            print(f'Data rate: {rate:.2f} {unit}')
         
 
 # %%
@@ -127,12 +153,14 @@ def run(addr: str, port: int):
     # Use DataBuffer for efficient data handling
     datasets: Dict[int, DataBuffer] = dict()
     packets: Dict[int, int] = dict()  # For debugging purposes
+    datarate = DataRate(update_rate=1.0)
     # Dataset(f"{datetime.now():%Y%m%d_%H%M%S}.nc",
                     #  'w', format='NETCDF4')
 
     while True:
         try:
             bytes = client.recv(20)
+            datarate.update(len(bytes))
             (id, gap, x, y, z) = struct.unpack('<IIfff', bytes)
             gap *= 1e-6 # Convert gap to seconds
             if id not in datasets:

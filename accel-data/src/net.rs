@@ -75,6 +75,7 @@ async fn handle_client_tcp(
     let mut source = sink.subscribe();
     let mut buf = Vec::with_capacity(1024);
     let mut counter = 0;
+    let mut dcounter = 0;
     let mut now = std::time::Instant::now();
 
     while running.load(Ordering::Relaxed) {
@@ -84,6 +85,7 @@ async fn handle_client_tcp(
                 if buf.len() + data.len() < buf.capacity() {
                     buf.extend_from_slice(&data);
                 } else {
+                    dcounter += buf.len();
                     if writer.write_all(&buf).await.is_err() {
                         log::error!("[NET] {addr}> Error sending data");
                         break;
@@ -91,9 +93,19 @@ async fn handle_client_tcp(
                     let nnow = std::time::Instant::now();
                     let dur = nnow.duration_since(now).as_secs_f32();
                     if dur > 1.0 {
-                        log::info!("[NET] {addr}> Packet rate: {:.3} packets/s", counter as f32 / dur);
+                        let mut drate = (dcounter * 8) as f32 / dur;
+                        let mut unit = "bps";
+                        if drate > 1024.0 {
+                            drate /= 1024.0;
+                            unit = "kbps";
+                        }
+                        log::info!(
+                            "[NET] {addr}> Packet rate: {:.3} packets/s ({drate:.3} {unit})",
+                            counter as f32 / dur,
+                        );
                         now = nnow;
                         counter = 0;
+                        dcounter = 0;
                     }
                     buf.clear();
                     buf.extend_from_slice(&data);
