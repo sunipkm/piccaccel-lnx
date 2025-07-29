@@ -58,7 +58,6 @@ class DataRate:
             self.last = now
             self.bytecount = 0
             self.count = 0
-            datarate *= 8  # Convert to bits per second
             dataunit = 'bps'
             if datarate > 1024:
                 datarate /= 1024
