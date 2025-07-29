@@ -3,3 +3,4 @@
 Cargo.lock
 .DS_Store
 *.nc
+**/__pycache__
