@@ -1,4 +1,5 @@
 # %%
+import matplotlib
 from pathlib import Path
 import socket
 import struct
@@ -20,16 +21,17 @@ from tcp_thread import TcpThread
 from nc_thread import NcDataset
 import warnings
 
-warnings.filterwarnings("ignore", category=RuntimeWarning)  # Ignore matplotlib warnings
+# Ignore matplotlib warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-import matplotlib
 matplotlib.use('QtAgg')  # Use TkAgg backend for interactive plotting
 # %%
 
 
 class DataBuffer:
     def __init__(self, maxlen=2000):
-        maxlen = 1 << int(np.ceil(np.log2(maxlen)))  # Ensure maxlen is a power of 2
+        # Ensure maxlen is a power of 2
+        maxlen = 1 << int(np.ceil(np.log2(maxlen)))
         self._data = deque(maxlen=maxlen)
 
     def append(self, item):
@@ -48,6 +50,7 @@ class DataBuffer:
         if columns is None:
             columns = ['tstamp', 'x', 'y', 'z', 'dx', 'dy', 'dz']
         return pd.DataFrame(list(self._data), columns=columns)
+
 
 class DataRate:
     def __init__(self, update_rate: float = 2.0):
@@ -74,7 +77,7 @@ class DataRate:
                 rate /= 1024*1024
                 unit = 'Mbps'
             print(f'Data rate: {rate:.2f} {unit}')
-        
+
 
 # %%
 DPI = 72
@@ -84,10 +87,16 @@ FIG_HEI = 600 / DPI
 
 def run(queue: Queue, winsize: int = 1000):
     plt.ioff()
-    grid = GridSpec(3, 8, width_ratios=[1]*8, height_ratios=[
-                    0.1, 1, 1], left=0.065, bottom=0.065, wspace=0.5)
+    grid = GridSpec(4, 8, width_ratios=[1]*8, height_ratios=[
+                    0.1, 0.1, 1, 1], left=0.065, bottom=0.065, wspace=0.5)
     fig = plt.figure(figsize=(FIG_WID, FIG_HEI), dpi=DPI, animated=True)
-    button_ax = fig.add_subplot(grid[0, 3:5])
+    text_ax = fig.add_subplot(grid[0, :])
+    text_ax.set_axis_off()
+    curtime = text_ax.text(
+        0.5, 0.5, "Accelerometer Data: Waiting for data...",
+        fontsize=14, ha='center', va='center', animated=True
+    )
+    button_ax = fig.add_subplot(grid[1, 3:5])
     # button_ax.set_axis_off()
     ncfile = NcDataset(Path.cwd() / 'data', button_ax)
     axs = []
@@ -96,9 +105,9 @@ def run(queue: Queue, winsize: int = 1000):
         for j in range(2):
             ar = slice(j*4, (j+1)*4)
             if i > 0:
-                ax = fig.add_subplot(grid[i+1, ar], sharex=axs[0][j])
+                ax = fig.add_subplot(grid[i+2, ar], sharex=axs[0][j])
             else:
-                ax = fig.add_subplot(grid[i+1, ar])
+                ax = fig.add_subplot(grid[i+2, ar])
             axs[i].append(ax)
     axs = np.asarray(axs)
     for ax in axs[:-1, :].flatten():
@@ -121,28 +130,42 @@ def run(queue: Queue, winsize: int = 1000):
         for aid, ax in enumerate(axm):
             lines[mid].append([])
             if aid % 2 == 0:
-                lines[mid][aid].append(ax.plot([], [], label='X', color='red', alpha=0.5)[0])
-                lines[mid][aid].append(ax.plot([], [], label='Y', color='green', alpha=0.5)[0])
-                lines[mid][aid].append(ax.plot([], [], label='Z', color='blue', alpha=0.5)[0])
+                lines[mid][aid].append(
+                    ax.plot([], [], label='X', color='red', alpha=0.5)[0])
+                lines[mid][aid].append(
+                    ax.plot([], [], label='Y', color='green', alpha=0.5)[0])
+                lines[mid][aid].append(
+                    ax.plot([], [], label='Z', color='blue', alpha=0.5)[0])
             else:
-                lines[mid][aid].append(ax.plot([], [], label='dX', color='red', alpha=0.5)[0])
-                lines[mid][aid].append(ax.plot([], [], label='dY', color='green', alpha=0.5)[0])
-                lines[mid][aid].append(ax.plot([], [], label='dZ', color='blue', alpha=0.5)[0])
+                lines[mid][aid].append(
+                    ax.plot([], [], label='dX', color='red', alpha=0.5)[0])
+                lines[mid][aid].append(
+                    ax.plot([], [], label='dY', color='green', alpha=0.5)[0])
+                lines[mid][aid].append(
+                    ax.plot([], [], label='dZ', color='blue', alpha=0.5)[0])
 
-
-    fig.suptitle("Accelerometer Data", fontsize=12, fontweight='bold')
     # fig.tight_layout()
     fig.text(0.025, 0.5, "Acceleration (g)", fontsize=12,
              ha='center', va='center', rotation='vertical')
-    fig.text(0.5, 0.025, "Time (ms)", fontsize=12, ha='center', va='center')
     fig.text(0.9725, 0.5, "Jerk (g/s)", fontsize=12,
-             ha='center', va='center', rotation='vertical')
+             ha='center', va='center', rotation='vertical', animated=True)
 
     fig.show()
 
+    flatlines = [line for sublist in lines for line in sublist]
+    flatlines = [line for sublist in flatlines for line in sublist]
+    artists = flatlines + [curtime]
+
     def update(frame):
         try:
-            dataframes = queue.get_nowait()
+            dataframes = None
+            while True:
+                try:
+                    dataframes = queue.get_nowait()
+                except Empty:
+                    break
+            if dataframes is None:
+                return artists
             ncfile.update(dataframes)
             for (llines, axm, (id, df)) in zip(lines, axs, dataframes):
                 df: pd.DataFrame = df
@@ -154,6 +177,7 @@ def run(queue: Queue, winsize: int = 1000):
                 # Show last second of data
                 sel = df['tstamp'] > (now - winsize * 1e-3)
                 tstamp = df['tstamp'][sel]  # Convert to milliseconds
+                curtime.set_text(f"Accelerometer Data: {now:.2f} s")
                 # tstamp = tstamp * 1e-6  # Convert to seconds
                 tstamp -= tstamp.iloc[-1]
                 tstamp *= 1e3  # Convert to milliseconds for plotting
@@ -163,7 +187,7 @@ def run(queue: Queue, winsize: int = 1000):
                 ymax_y = np.nanmax(df['y'][sel])
                 ymin_z = np.nanmin(df['z'][sel])
                 ymax_z = np.nanmax(df['z'][sel])
-                ymin_dx = np.nanmin(df['dx'][sel]) 
+                ymin_dx = np.nanmin(df['dx'][sel])
                 ymax_dx = np.nanmax(df['dx'][sel])
                 ymin_dy = np.nanmin(df['dy'][sel])
                 ymax_dy = np.nanmax(df['dy'][sel])
@@ -181,8 +205,6 @@ def run(queue: Queue, winsize: int = 1000):
                     dymin = -1
                 if np.isnan(dymax):
                     dymax = 1
-                # print(f"ID {id}> {len(tstamp)} points, time range {tstamp.iloc[0]} to {tstamp.iloc[-1]} ms")
-                # print(f'ID {id}> Y-axis limits: Y: ({ymin}, {ymax}), dY: ({dymin}, {dymax})')
                 for aid, (lline, ax) in enumerate(zip(llines, axm)):
                     lline: list = lline
                     ax: Axes = ax
@@ -199,25 +221,15 @@ def run(queue: Queue, winsize: int = 1000):
                             ax.set_ylim(dymin, dymax)
                     ax.relim()
                     ax.autoscale_view()
-                # draw_start = perf_counter_ns()
-                # fig.canvas.draw_idle()
-                # draw_end = perf_counter_ns()
-                # draw_time = (draw_end - draw_start) *1e-6
-                # if draw_time > 100:
-                #     print(f"\tDrawing took too long: {draw_time:.2f} ms, consider reducing window size")
-                # flush_start = perf_counter_ns()
-                # fig.canvas.flush_events()
-                # flush_end = perf_counter_ns()
-                # flush_time = (flush_end - flush_start) * 1e-6
-                # if flush_time > 100:
-                #     print(f"\tFlushing took too long: {flush_time:.2f} ms")
         except Empty:
             sleep(0.01)
-        flatlines = [line for sublist in lines for line in sublist]
-        flatlines = [line for sublist in flatlines for line in sublist]
-        return flatlines
+        return artists
 
-    animation = FuncAnimation(fig, update, blit=True, repeat=False, save_count=100)
+    animation = FuncAnimation(
+        fig, update, blit=True,
+        repeat=False, save_count=100,
+        interval=100
+    )
     plt.show()
     print("Done receiving data")
     ncfile.close()
@@ -249,5 +261,6 @@ if __name__ == "__main__":
     thread = TcpThread(args.host, args.port, queue, datasize=winsize)
     thread.daemon = True  # Ensure the thread exits when the main program exits
     thread.start()
-    print(f"Starting TCP client thread for {args.host}:{args.port} with window size {winsize} ms")
+    print(
+        f"Starting TCP client thread for {args.host}:{args.port} with window size {winsize} ms")
     run(queue, winsize=winsize)

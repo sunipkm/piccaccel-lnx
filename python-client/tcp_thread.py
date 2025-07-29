@@ -35,10 +35,12 @@ class DataBuffer:
 
 
 class DataRate:
-    def __init__(self, update_rate: float = 2.0):
+    def __init__(self, update_rate: float = 2.0, text: str = "Data rate", bps: bool = True):
         self.count = 0
         self.last = None  # Last timestamp for calculating data rate
         self.update_rate = update_rate
+        self.text = text
+        self.bps = bps
 
     def update(self, num_samples: int = 1):
         now = perf_counter_ns()
@@ -47,18 +49,25 @@ class DataRate:
             self.last = now
             return
         elapsed = (now - self.last) / 1e9
-        if elapsed > 2.0:  # Update every second
-            rate = self.count * 8 / elapsed
+        if elapsed > self.update_rate:  # Update every second
+            rate = self.count / elapsed
             self.last = now
             self.count = 0
-            unit = 'bps'
-            if rate > 1024:
-                rate /= 1024
-                unit = 'Kbps'
-            elif rate > 1024*1024:
-                rate /= 1024*1024
-                unit = 'Mbps'
-            print(f'\tData rate: {rate:.2f} {unit}')
+            if self.bps:
+                rate *= 8  # Convert to bits per second
+                unit = 'bps'
+                if rate > 1024:
+                    rate /= 1024
+                    unit = 'Kbps'
+                elif rate > 1024*1024:
+                    rate /= 1024*1024
+                    unit = 'Mbps'
+            else:
+                unit = 'samples/s'
+                if rate > 1000:
+                    rate /= 1000
+                    unit = 'Ksamples/s'
+            print(f'\t{self.text}: {rate:.2f} {unit}')
 
 
 class TcpThread(Thread):
@@ -76,6 +85,7 @@ class TcpThread(Thread):
         datasets: Dict[int, DataBuffer] = dict()
         packets: Dict[int, int] = dict()  # For debugging purposes
         datarate = DataRate(update_rate=1.0)
+        packetrate = DataRate(update_rate=1.0, text="Packet rate", bps=False)
         while True:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
@@ -92,6 +102,7 @@ class TcpThread(Thread):
             try:
                 bytes = client.recv(20)
                 datarate.update(len(bytes))
+                packetrate.update()
                 (id, gap, x, y, z) = struct.unpack('<IIfff', bytes)
                 gap *= 1e-6 # Convert gap to seconds
                 if id not in datasets:
